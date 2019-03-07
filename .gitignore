@@ -6,3 +6,6 @@ settings.json
 
 # python
 __pycache__
+
+# dont save data
+data/*
