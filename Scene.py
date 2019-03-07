@@ -1,21 +1,41 @@
 import p5
+import PIL
 import math
 import random
+import json
+import numpy as np
 from Block import Block
 from Ball import Ball
-from Brain import Manual, Neural_Network, Deep_Learning
+import Brain
+
+
+def int_to_n_digit_serialized(x, n):
+    t = str(x)
+    if len(t) > n:
+        raise ValueError("too large number")
+    return "0" * (n - len(t)) + t
 
 
 class Scene:
     def __init__(self, w=900, h=600):
         # prediction
-        self.brain = Neural_Network()
-        self.batch_size = 50
-        self.epochs = 100
+        self.brain = Brain.Deep_Learning()
+        self.brain.load_data()
+
+        if isinstance(self.brain, Brain.Neural_Network):
+            self.batch_size = 70
+            self.epochs = 150
+        elif isinstance(self.brain, Brain.Deep_Learning):
+            self.batch_size = 50
+            self.epochs = 40
+        else:
+            self.batch_size = 0
+            self.epochs = 0
 
         # global const
         self.width = w
         self.height = h
+        self.offset = 5
         p5.size(self.width, self.height)
 
         self.should_serve = True
@@ -23,11 +43,11 @@ class Scene:
         self.serve_user = True
         self.user_interaction = 0
 
-        self.gathering_NN_data = False
         self.gathering_DL_data = False
         self.trainings = []
 
-        self.draw_prediction = True
+        self.draw_prediction = False
+        self.last_prediction = None
 
         self.speed_factor = 1.4
         self.block_height = self.height / 5.0
@@ -42,16 +62,51 @@ class Scene:
         self.serve()
         self.printScore()
 
+        self.frame_rate = 0
+
     def draw(self):
+        if self.frame_rate == 0:
+            p5.background(0, 0, 0)  # set initial background to black
+
+        # action
         if self.paused:
             return
 
-        p5.background(0, 0, 0, 90)
+        self.frame_rate += 1
 
         self.update()
 
-        p5.fill(230)
-        p5.stroke(230, 1)
+        # MARK actual drawing
+        p5.background(0, 0, 0, 90)
+
+        if False:
+
+            for i in range(0, self.height, 10):
+                a = math.floor(255 * i / (self.height) + 1)
+                p5.fill(a, a, a, 255)
+                p5.rect((0, i), 100, 15)
+
+            if self.frame_rate > 1:
+                return
+
+            p5.sketch.renderer.flush_geometry()
+            pixel_data = p5.sketch.renderer.fbuffer.read(
+                mode='color', alpha=False)
+            # len(pixel_data) = 600
+            # len(pixel_data[0]) = 900
+            # pixel_data[i][j] = [r, g, b] # suppose it's uniform
+
+            for i in range(len(pixel_data)):  # in height
+                print(str(pixel_data[i][0]) + " - " +
+                      str(pixel_data[i][len(pixel_data[i]) // 2]))
+
+            # pixels = [[[float(e) / 255.0 for e in pixel_data[i][j]] for j in range(
+            #     0, 2, 1)]for i in range(0, len(pixel_data), 4)]
+
+            return
+
+        p5.fill(255)
+        p5.stroke(255)
 
         p5.rect((self.user.x, self.user.y),
                 self.block_width, self.block_height)
@@ -59,6 +114,12 @@ class Scene:
                 self.block_width, self.block_height)
         p5.ellipse((self.ball.x, self.ball.y), 2 *
                    self.ball_radius, 2 * self.ball_radius)
+
+        if self.draw_prediction and self.last_prediction is not None:
+            p5.no_fill()
+            p5.stroke(220, 0, 0)
+            p5.ellipse((self.width - self.block_width - self.ball_radius, self.last_prediction),
+                       2 * self.ball_radius, 2 * self.ball_radius)
 
     def update(self):
         self.user.y += self.user_interaction * self.speed
@@ -70,15 +131,12 @@ class Scene:
 
         y_pred = self.predictCollisionHeight()
         if self.draw_prediction:
-            p5.no_fill()
-            p5.stroke(220, 5)
-            p5.ellipse((self.width - self.block_width - self.ball_radius, y_pred),
-                       2 * self.ball_radius, 2 * self.ball_radius)
+            self.last_prediction = y_pred
 
         machine_interaction = 0
-        if self.machine.y + 0.5 * self.block_height > y_pred + 0.125 * self.block_height:
+        if self.machine.y + 0.5 * self.block_height > y_pred + self.offset:
             machine_interaction -= 1
-        elif self.machine.y + 0.5 * self.block_height < y_pred - 0.125 * self.block_height:
+        elif self.machine.y + 0.5 * self.block_height < y_pred - self.offset:
             machine_interaction += 1
         self.machine.y += machine_interaction * self.speed
 
@@ -159,7 +217,7 @@ class Scene:
                 self.batch_size += 10
             print("increasing batch_size to {}".format(self.batch_size))
         elif event.key == 'UP':
-            print("decreasing u_i")
+            # print("decreasing u_i")
             self.user_interaction -= 1
 
         if event.is_shift_down() and event.key == 'DOWN':
@@ -167,7 +225,7 @@ class Scene:
                 self.batch_size -= 10
             print("decreasing batch_size to {}".format(self.batch_size))
         elif event.key == 'DOWN':
-            print("increasing u_i")
+            # print("increasing u_i")
             self.user_interaction += 1
 
         if event.is_shift_down() and event.key == 'LEFT':
@@ -186,9 +244,9 @@ class Scene:
 
     def key_released(self, event):
         # print(event.key)
-        if event.key == 'UP':
+        if event.key == 'UP' and self.user_interaction < 0:  # remove anoying bug
             self.user_interaction += 1
-        if event.key == 'DOWN':
+        if event.key == 'DOWN' and self.user_interaction > 0:  # remove anoying bug
             self.user_interaction -= 1
 
     def pause(self, arg):
@@ -201,7 +259,7 @@ class Scene:
         return self.paused
 
     def printScore(self):
-        p5.title("{} - {}".format(self.user.score, self.machine.score))
+        p5.title('{} - {}'.format(self.user.score, self.machine.score))
 
     def resetScore(self):
         self.user.score = 0
@@ -227,22 +285,83 @@ class Scene:
         self.serve_user = not self.serve_user
         self.should_serve = False
 
+    def get_pixelated_frame(self, export_numpy_nd_array=False):
+        SKIP_WIDTH = 10  # NOTE: do NOT change
+        SKIP_HEIGHT = 10  # NOTE: do NOT change
+
+        p5.sketch.renderer.flush_geometry()
+        pixel_data = p5.sketch.renderer.fbuffer.read(mode='color', alpha=True)
+
+        pixel = [[int(pixel_data[i][j][0])
+                  for j in range(0, len(pixel_data[i]), SKIP_WIDTH)]
+                 for i in range(0, len(pixel_data), SKIP_HEIGHT)]
+
+        if export_numpy_nd_array:
+            return np.expand_dims(np.array(pixel, ndmin=3), axis=3)
+
+        return pixel
+
     def predictCollisionHeight(self):
         W = self.width - 2 * (self.ball_radius + self.block_width)
         H = self.height - 2 * self.ball_radius
 
         x0 = (self.ball.x - self.ball_radius - self.block_width) / W
         y0 = (self.ball.y - self.ball_radius) / H
+        vx = self.ball.vx / self.speed / self.speed_factor
+        vy = self.ball.vy / self.speed / self.speed_factor
 
         if self.brain.useRaw:
-            pass
+            yC = self.brain.predict_raw(
+                self.get_pixelated_frame(export_numpy_nd_array=True))
         else:
-            yC = self.brain.predict(
-                x0,
-                y0,
-                self.ball.vx / self.speed / self.speed_factor,
-                self.ball.vy / self.speed / self.speed_factor,
-                H / W
-            )
+            yC = self.brain.predict(x0, y0, vx, vy, H / W)
+
+        cond = self.gathering_DL_data and self.frame_rate % 30 == 0 and x0 > 0.05 and x0 < 0.95
+        if cond:
+            print("gathering data")
+            LIM = 300
+            if len(self.trainings) < LIM:
+                self.trainings.append((
+                    self.get_pixelated_frame(),
+                    Brain.Manual.predict(None, x0, y0, vx, vy, H / W)
+                ))
+            else:
+                """
+                file format
+                DDDD[number of entruies]
+                DDDD[width of the entries]
+                DDDD[height of the entries]
+                for each entry:
+                    for each line:
+                        for each element:
+                            D*,[pixel color]
+                    DDDD[fractional part of prediction]
+                """
+                n_entries = len(self.trainings)
+                entries_h = len(self.trainings[0][0])     # ~600
+                entries_w = len(self.trainings[0][0][0])  # ~900
+
+                text = (int_to_n_digit_serialized(n_entries, 4)
+                        + int_to_n_digit_serialized(entries_h, 4)
+                        + int_to_n_digit_serialized(entries_w, 4)
+                        )
+
+                for t in self.trainings:
+                    text += ''.join(''.join(str(e)+"," for e in line)
+                                    for line in t[0])
+
+                    pred_t = str(
+                        0.99999 if t[1] >= 1 else t[1]
+                    )[2:6]
+                    text += pred_t + ";"
+
+                f = open("./data/data_frame.serialized", "w+")
+                f.write(text)
+                f.close()
+
+                self.trainings = None
+                self.gathering_DL_data = False
+
+                print("done!")
 
         return yC * H + self.ball_radius
