@@ -23,5 +23,5 @@ def key_released(event):
 
 
 if __name__ == "__main__":
-    p5.run()
+    p5.run(frame_rate=45)
     pass

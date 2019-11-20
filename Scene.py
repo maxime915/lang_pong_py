@@ -1,8 +1,6 @@
 import p5
-import PIL
 import math
 import random
-import json
 import numpy as np
 from Block import Block
 from Ball import Ball
@@ -20,7 +18,11 @@ class Scene:
     def __init__(self, w=900, h=600):
         # prediction
         self.brain = Brain.Deep_Learning()
+        self.brain.load_from_backup(
+            "/Users/maxime/Downloads/lang_pong_py/saved/deep_learning_2019-03-11 18:54:52.634303_.h5"
+        )
         self.brain.load_data()
+        self.brain.setup_model()
 
         if isinstance(self.brain, Brain.Neural_Network):
             self.batch_size = 70
@@ -76,34 +78,8 @@ class Scene:
 
         self.update()
 
-        # MARK actual drawing
+        # MARK: actual drawing
         p5.background(0, 0, 0, 90)
-
-        if False:
-
-            for i in range(0, self.height, 10):
-                a = math.floor(255 * i / (self.height) + 1)
-                p5.fill(a, a, a, 255)
-                p5.rect((0, i), 100, 15)
-
-            if self.frame_rate > 1:
-                return
-
-            p5.sketch.renderer.flush_geometry()
-            pixel_data = p5.sketch.renderer.fbuffer.read(
-                mode='color', alpha=False)
-            # len(pixel_data) = 600
-            # len(pixel_data[0]) = 900
-            # pixel_data[i][j] = [r, g, b] # suppose it's uniform
-
-            for i in range(len(pixel_data)):  # in height
-                print(str(pixel_data[i][0]) + " - " +
-                      str(pixel_data[i][len(pixel_data[i]) // 2]))
-
-            # pixels = [[[float(e) / 255.0 for e in pixel_data[i][j]] for j in range(
-            #     0, 2, 1)]for i in range(0, len(pixel_data), 4)]
-
-            return
 
         p5.fill(255)
         p5.stroke(255)
@@ -242,6 +218,10 @@ class Scene:
             print('training @{}bs&{}ep'.format(self.batch_size, self.epochs))
             self.brain.train(self.batch_size, self.epochs, verbose_=1)
 
+        if event.is_shift_down() and event.key == 'E':
+            print("exporting model")
+            self.brain.export()
+
     def key_released(self, event):
         # print(event.key)
         if event.key == 'UP' and self.user_interaction < 0:  # remove anoying bug
@@ -285,21 +265,24 @@ class Scene:
         self.serve_user = not self.serve_user
         self.should_serve = False
 
-    def get_pixelated_frame(self, export_numpy_nd_array=False):
+    def get_pixelated_frame(self, export_as_int_list=False):
         SKIP_WIDTH = 10  # NOTE: do NOT change
         SKIP_HEIGHT = 10  # NOTE: do NOT change
 
         p5.sketch.renderer.flush_geometry()
         pixel_data = p5.sketch.renderer.fbuffer.read(mode='color', alpha=True)
 
-        pixel = [[int(pixel_data[i][j][0])
-                  for j in range(0, len(pixel_data[i]), SKIP_WIDTH)]
-                 for i in range(0, len(pixel_data), SKIP_HEIGHT)]
+        if export_as_int_list:
+            return [[int(pixel_data[i][j][0])
+                     for j in range(0, len(pixel_data[i]), SKIP_WIDTH)]
+                    for i in range(0, len(pixel_data), SKIP_HEIGHT)]
 
-        if export_numpy_nd_array:
-            return np.expand_dims(np.array(pixel, ndmin=3), axis=3)
-
-        return pixel
+        return np.expand_dims(np.array(
+            [[pixel_data[i][j][0] / 255.0
+              for j in range(0, len(pixel_data[i]), SKIP_WIDTH)]
+             for i in range(0, len(pixel_data), SKIP_HEIGHT)],
+            ndmin=3
+        ), axis=3)
 
     def predictCollisionHeight(self):
         W = self.width - 2 * (self.ball_radius + self.block_width)
@@ -312,7 +295,7 @@ class Scene:
 
         if self.brain.useRaw:
             yC = self.brain.predict_raw(
-                self.get_pixelated_frame(export_numpy_nd_array=True))
+                self.get_pixelated_frame())
         else:
             yC = self.brain.predict(x0, y0, vx, vy, H / W)
 
@@ -322,7 +305,7 @@ class Scene:
             LIM = 300
             if len(self.trainings) < LIM:
                 self.trainings.append((
-                    self.get_pixelated_frame(),
+                    self.get_pixelated_frame(export_as_int_list=True),
                     Brain.Manual.predict(None, x0, y0, vx, vy, H / W)
                 ))
             else:

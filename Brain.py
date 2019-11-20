@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from datetime import datetime as dt
 import json
 import math
 
@@ -7,6 +8,9 @@ import math
 class Manual:
     def __init__(self):
         self.useRaw = False
+        pass
+
+    def setup_model(self, deeper=False):
         pass
 
     def predict(self, x0, y0, vx, vy, h_w):
@@ -24,7 +28,11 @@ class Manual:
     def train(self, batch_size_, epochs_, verbose_=1):
         print("no need to train [Manual]")
 
-    def export(self):
+    def load_from_backup(self, path=""):  # not static due to limitation
+        print("nothing to load")
+        return self
+
+    def export(self, path=""):
         print("no need to export [Manual]")
 
 
@@ -38,19 +46,22 @@ class Neural_Network:
             tf.keras.layers.Dense(
                 1, activation=tf.keras.activations.sigmoid),
         ])
-        opt = tf.keras.optimizers.SGD(
-            lr=0.5, momentum=0.6, nesterov=True
-        )
         self.model.compile(
-            loss=tf.keras.losses.MeanSquaredError(),
-            optimizer=opt
+            loss="mean_squared_error",
+            optimizer="adadelta"
         )
         self.in__data = None
         self.out_data = None
 
-    @staticmethod
-    def loadFromBackup(bkp):
-        raise NotImplementedError("method not implemented")
+    def setup_model(self, deeper=False):
+        pass
+
+    # not static due to limitation
+    def load_from_backup(self, path="./saved/neural_network.h5"):
+        try:
+            self.model = tf.keras.models.load_model(path)
+        except Exception as e:
+            print("something went wrong while loading: {}".format(e))
 
     def load_data(self, address="./data/data_num.json"):
         with open(address, "r") as f:
@@ -77,8 +88,13 @@ class Neural_Network:
     def predict_raw(self, pixels):
         raise NotImplementedError("method not implemented")
 
-    def export(self):
-        raise NotImplementedError("method not implemented")
+    def export(self, path=None):
+        if path is None:
+            path = "./saved/neural_network" + "_" + str(dt.now()) + "_.h5"
+        try:
+            self.model.save(path)
+        except Exception as e:
+            print("something went wrong: {}".format(e))
 
 
 class Deep_Learning:
@@ -93,39 +109,44 @@ class Deep_Learning:
 
     def setup_model(self):
         if self.inputShape is None:
-            # raise ValueError("input size is not defined try loading data")
-            self.inputShape = (60, 90)
+            raise ValueError("input size is not defined try loading data")
 
-        self.model = tf.keras.models.Sequential([
+        self.model = tf.keras.models.Sequential()
+
+        self.model.add(  # conv
             tf.keras.layers.Conv2D(
-                input_shape=(60, 90, 1),
-                filters=3,
-                kernel_size=10
-            ),
-            tf.keras.layers.MaxPool2D(),
-            # tf.keras.layers.Conv2D(
-            #     filters=3,
-            #     kernel_size=10
-            # ),
-            # tf.keras.layers.MaxPool2D(),
-            tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(
-                units=5, activation=tf.keras.activations.relu),
-            tf.keras.layers.Dense(
-                units=1, activation=tf.keras.activations.sigmoid)
-        ])
-        opt = tf.keras.optimizers.SGD(
-            lr=0.5, momentum=0.6, nesterov=True)
+                input_shape=(self.inputShape[0], self.inputShape[1], 1),
+                filters=4,
+                kernel_size=(5, 5),
+                padding="valid"
+            )
+        )
+        self.model.add(tf.keras.layers.MaxPooling2D())  # pool
+
+        self.model.add(tf.keras.layers.Flatten())  # 2D -> 1D
+
+        self.model.add(tf.keras.layers.Dense(  # dense
+            units=40, activation=tf.keras.activations.tanh)
+        )
+        self.model.add(tf.keras.layers.Dense(  # dense
+            units=10, activation=tf.keras.activations.tanh)
+        )
+        self.model.add(tf.keras.layers.Dense(
+            units=1, activation=tf.keras.activations.sigmoid)
+        )
         self.model.compile(
-            loss=tf.keras.losses.MeanSquaredError(),
-            optimizer=opt
+            loss="mean_absolute_error",
+            optimizer="nadam"
         )
 
-    @staticmethod
-    def loadFromBackup(bkp):
-        raise NotImplementedError("method not implemented")
+    # not static due to limitation
+    def load_from_backup(self, path="./saved/deep_learning.h5"):
+        try:
+            self.model = tf.keras.models.load_model(path)
+        except Exception as e:
+            print("something went wrong while loading: {}".format(e))
 
-    def load_data(self, address="./data/data_frame.serialized"):
+    def load_data(self, address="./data/data_frame.serialized", verbose=False):
         f = open(address, "r")
         n_entries = int(f.read(4))
         entries_h = int(f.read(4))
@@ -157,15 +178,13 @@ class Deep_Learning:
         self.out_data = np.array(out_raw)
         self.inputShape = (entries_h, entries_w)
 
-        if True:
+        if verbose:
             print("decoded: ")
             print(n_entries)
             print(entries_h)
             print(entries_w)
             print(self.in__data.shape)
             print(self.out_data.shape)
-
-        self.setup_model()
 
     def train(self, batch_size_, epochs_, verbose_=1):
         if self.in__data is None or self.out_data is None:
@@ -187,5 +206,10 @@ class Deep_Learning:
         """
         return self.model.predict(pixels)
 
-    def export(self):
-        raise NotImplementedError("method not implemented")
+    def export(self, path=None):
+        if path is None:
+            path = "./saved/deep_learning" + "_" + str(dt.now()) + "_.h5"
+        try:
+            self.model.save(path)
+        except Exception as e:
+            print("something went wrong: {}".format(e))
